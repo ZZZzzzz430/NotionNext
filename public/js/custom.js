@@ -1,72 +1,106 @@
 // 这里编写自定义js脚本；将被静态引入到页面中
 // public/js/custom.js
+// public/js/custom.js
 
 function isTargetPage() {
-  // 只在这个页面启用
   return window.location.pathname === "/article/查找和内容汇集";
 }
 
-async function postToBackend(payload) {
-  // TODO: 改成你的后端地址
-  const url = "http://localhost:5678/webhook/search";
+function findSearchAnchor() {
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
 
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    // 如果你需要带 cookie：credentials: "include",
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`POST failed: ${resp.status} ${text}`);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue.includes("[[SEARCH_BOX]]")) {
+      return node;
+    }
   }
-
-  // 如果后端返回 JSON
-  return resp.json().catch(() => ({}));
+  return null;
 }
 
-function mountButton() {
-  const btn = document.createElement("button");
-  btn.textContent = "发送 POST";
-  btn.style.cssText = `
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 99999;
-    padding: 10px 14px;
+function createSearchBox() {
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = `
+    margin: 16px 0;
+    padding: 12px;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    background: #fafafa;
+  `;
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "输入要查找的关键词";
+  input.style.cssText = `
+    padding: 8px;
+    width: 220px;
+    margin-right: 8px;
     border: 1px solid #ccc;
-    border-radius: 10px;
+    border-radius: 6px;
+  `;
+
+  const button = document.createElement("button");
+  button.textContent = "搜索";
+  button.style.cssText = `
+    padding: 8px 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
     background: white;
     cursor: pointer;
   `;
 
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.textContent = "发送中...";
+  button.addEventListener("click", async () => {
+    const keyword = input.value.trim();
+    if (!keyword) {
+      alert("请输入关键词");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "搜索中...";
+
     try {
-      const data = await postToBackend({
-        from: "notionnext",
-        page: window.location.pathname,
-        ts: Date.now(),
+      await fetch("http://localhost:5678/webhook/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ keyword }),
       });
-      alert("成功：" + JSON.stringify(data));
+
+      alert("已发送到搜索流程");
     } catch (e) {
-      alert("失败：" + (e?.message || e));
+      alert("请求失败");
     } finally {
-      btn.disabled = false;
-      btn.textContent = "发送 POST";
+      button.disabled = false;
+      button.textContent = "搜索";
     }
   });
 
-  document.body.appendChild(btn);
+  wrapper.appendChild(input);
+  wrapper.appendChild(button);
+  return wrapper;
+}
+
+function replaceAnchorWithSearchBox() {
+  const anchorTextNode = findSearchAnchor();
+  if (!anchorTextNode) return;
+
+  const parent = anchorTextNode.parentNode;
+  const box = createSearchBox();
+
+  parent.replaceChild(box, anchorTextNode);
 }
 
 (function main() {
   if (!isTargetPage()) return;
 
-  // 等页面加载完成再执行
   window.addEventListener("load", () => {
-    mountButton();
+    replaceAnchorWithSearchBox();
   });
 })();
+
