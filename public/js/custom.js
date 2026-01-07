@@ -8,7 +8,7 @@ function isTargetPage() {
 
 async function postToBackend(payload) {
   // TODO: 改成你的后端地址
-  const url = "https://YOUR_BACKEND_DOMAIN/api/xxx";
+  const url = "http://localhost:5678/webhook/search";
 
   const resp = await fetch(url, {
     method: "POST",
