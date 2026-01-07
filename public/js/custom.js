@@ -4,7 +4,7 @@ console.log("[custom.js] loaded", window.location.pathname);
 
 const TARGET_PATH_DECODED = "/article/查找和内容汇集";
 // ！！改成你的 n8n Production Webhook 地址（不要 localhost）
-const WEBHOOK_URL = "http://localhost:5678/webhook/search";
+const WEBHOOK_URL = "https://zzz832501.app.n8n.cloud/webhook/search";
 
 function isTargetPage() {
   // 兼容：pathname 可能是编码的
