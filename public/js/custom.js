@@ -1,28 +1,60 @@
-// 这里编写自定义js脚本；将被静态引入到页面中
 // public/js/custom.js
 console.log("[custom.js] loaded", window.location.pathname);
 
+/**
+ * 只在这篇文章页生效（中文路径要用 decodeURIComponent 比较）
+ */
 const TARGET_PATH_DECODED = "/article/查找和内容汇集";
-// ！！改成你的 n8n Production Webhook 地址（不要 localhost）
-const WEBHOOK_URL = "https://zzz832501.app.n8n.cloud/webhook/search";
+
+/**
+ * ✅ 改成你自己的 Next.js API 代理（同源，不跨域，不会 CORS）
+ * 你已经做了代理的话，就用这个
+ */
+const PROXY_API_URL = "/api/n8n-search";
+
+/**
+ * Notion 页面占位符：你在 Notion 里写这一行
+ */
+const ANCHOR_TEXT = "[[SEARCH_BOX]]";
 
 function isTargetPage() {
-  // 兼容：pathname 可能是编码的
-  const decoded = decodeURIComponent(window.location.pathname);
-  return decoded === TARGET_PATH_DECODED;
+  try {
+    const decoded = decodeURIComponent(window.location.pathname);
+    return decoded === TARGET_PATH_DECODED;
+  } catch {
+    // decode 出错时兜底
+    return window.location.pathname === TARGET_PATH_DECODED;
+  }
 }
 
+/**
+ * 找到包含 [[SEARCH_BOX]] 的“块元素”
+ * 注意：Notion 渲染会嵌套很多 div/span，所以用 textContent 搜索 + 取最短的
+ */
 function findAnchorElement() {
-  // 不用 TreeWalker 了：Notion 渲染可能把文本拆成多个节点
-  // 找到“看起来像一个独立块”的元素，其 textContent 包含 [[SEARCH_BOX]]
   const candidates = Array.from(document.querySelectorAll("div, p, span"))
-    .filter(el => el && el.textContent && el.textContent.includes("[[SEARCH_BOX]]"));
+    .filter(el => el && typeof el.textContent === "string" && el.textContent.includes(ANCHOR_TEXT));
 
   if (!candidates.length) return null;
 
-  // 优先选择文本最短的那个（更像“单独一行占位块”）
-  candidates.sort((a, b) => a.textContent.length - b.textContent.length);
+  candidates.sort((a, b) => (a.textContent.length || 0) - (b.textContent.length || 0));
   return candidates[0];
+}
+
+function createResultBox() {
+  const box = document.createElement("div");
+  box.style.cssText = `
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px dashed #d0d0d0;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: none;
+  `;
+  return box;
 }
 
 function createSearchBox() {
@@ -32,8 +64,12 @@ function createSearchBox() {
     margin: 16px 0;
     padding: 12px;
     border: 1px solid #e5e5e5;
-    border-radius: 8px;
+    border-radius: 10px;
     background: #fafafa;
+  `;
+
+  const row = document.createElement("div");
+  row.style.cssText = `
     display: flex;
     gap: 8px;
     align-items: center;
@@ -44,10 +80,11 @@ function createSearchBox() {
   input.type = "text";
   input.placeholder = "输入要查找的关键词";
   input.style.cssText = `
-    padding: 8px;
-    width: 240px;
+    padding: 8px 10px;
+    width: 260px;
     border: 1px solid #ccc;
-    border-radius: 6px;
+    border-radius: 8px;
+    outline: none;
   `;
 
   const button = document.createElement("button");
@@ -55,7 +92,7 @@ function createSearchBox() {
   button.style.cssText = `
     padding: 8px 14px;
     border: 1px solid #ccc;
-    border-radius: 6px;
+    border-radius: 8px;
     background: white;
     cursor: pointer;
   `;
@@ -64,7 +101,9 @@ function createSearchBox() {
   status.style.cssText = "font-size: 12px; color: #666;";
   status.textContent = "";
 
-  button.addEventListener("click", async () => {
+  const resultBox = createResultBox();
+
+  async function doSearch() {
     const keyword = input.value.trim();
     if (!keyword) {
       alert("请输入关键词");
@@ -74,40 +113,70 @@ function createSearchBox() {
     button.disabled = true;
     button.textContent = "搜索中...";
     status.textContent = "请求发送中…";
+    resultBox.style.display = "none";
+    resultBox.textContent = "";
 
     try {
-      const resp = await fetch(WEBHOOK_URL, {
+      // ✅ 走同源代理，CORS 不会拦
+      const resp = await fetch(PROXY_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword }),
       });
 
-      if (!resp.ok) {
-        const t = await resp.text();
-        throw new Error(`HTTP ${resp.status}: ${t}`);
+      const contentType = resp.headers.get("content-type") || "";
+      let payload;
+
+      if (contentType.includes("application/json")) {
+        payload = await resp.json();
+      } else {
+        payload = await resp.text();
       }
 
-      status.textContent = "已发送 ✅";
+      if (!resp.ok) {
+        const errText = typeof payload === "string" ? payload : JSON.stringify(payload);
+        throw new Error(`HTTP ${resp.status}: ${errText}`);
+      }
+
+      status.textContent = "成功 ✅";
+      resultBox.style.display = "block";
+      resultBox.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
     } catch (e) {
-      console.error(e);
+      console.error("[search] failed:", e);
       status.textContent = "失败 ❌（看 Console）";
-      alert("请求失败：" + (e?.message || e));
+      resultBox.style.display = "block";
+      resultBox.textContent = `请求失败：${e?.message || e}`;
     } finally {
       button.disabled = false;
       button.textContent = "搜索";
     }
+  }
+
+  // 点击按钮搜索
+  button.addEventListener("click", doSearch);
+
+  // 回车搜索
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doSearch();
   });
 
-  wrapper.appendChild(input);
-  wrapper.appendChild(button);
-  wrapper.appendChild(status);
+  row.appendChild(input);
+  row.appendChild(button);
+  row.appendChild(status);
+
+  wrapper.appendChild(row);
+  wrapper.appendChild(resultBox);
+
   return wrapper;
 }
 
+/**
+ * 尝试插入（只插一次）
+ */
 function tryInsertOnce() {
   if (!isTargetPage()) return;
 
-  // 防止重复插入
+  // 已插入就不重复插
   if (document.querySelector('[data-notionnext-searchbox="1"]')) return;
 
   const anchor = findAnchorElement();
@@ -115,8 +184,7 @@ function tryInsertOnce() {
 
   const box = createSearchBox();
 
-  // 用 box 替换锚点所在“那一块”
-  // 有时候 anchor 是 span，需要替换它更高层的块容器
+  // 替换更“像块”的容器
   const replaceTarget = anchor.closest("div, p") || anchor;
   replaceTarget.replaceWith(box);
 
@@ -124,23 +192,22 @@ function tryInsertOnce() {
 }
 
 (function main() {
+  // 不在目标页面直接退出（方便你扩展：可以做多页面多个锚点）
   if (!isTargetPage()) {
     console.log("[custom.js] not target page:", decodeURIComponent(window.location.pathname));
     return;
   }
 
-  // 1) 先试一次
+  // 先试一次
   tryInsertOnce();
 
-  // 2) 页面内容后渲染：用观察者等它出现
+  // 观察 DOM 变化：Notion 内容可能晚一点渲染出来
   const obs = new MutationObserver(() => {
     tryInsertOnce();
   });
 
   obs.observe(document.body, { childList: true, subtree: true });
 
-  // 3) 兜底：1 秒后再试一次
+  // 兜底再试一次
   setTimeout(tryInsertOnce, 1000);
 })();
-
-
